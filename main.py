@@ -4,12 +4,10 @@ FB AI Content Agent - Group Photo Compositor
 """
 
 import os
-import sys
 import uuid
 import logging
 import asyncio
 from pathlib import Path
-
 from fastapi import FastAPI, UploadFile, File, Form
 from fastapi.responses import HTMLResponse, FileResponse, JSONResponse
 from dotenv import load_dotenv
@@ -18,46 +16,6 @@ from typing import List
 import image_gen
 import ai_agent
 
-# bg_remover module (u2net onnx)
-try:
-    sys.path.insert(0, str(Path(__file__).parent / "bg_remover"))
-    import onnxruntime as ort
-    import numpy as np
-    from PIL import Image as PILImage
-    import io as _io
-    _BG_MODEL_PATH = Path(__file__).parent / "bg_remover" / "u2net.onnx"
-    if _BG_MODEL_PATH.exists():
-        _bg_session = ort.InferenceSession(str(_BG_MODEL_PATH), providers=["CPUExecutionProvider"])
-        _bg_input_name = _bg_session.get_inputs()[0].name
-        BG_REMOVE_AVAILABLE = True
-    else:
-        BG_REMOVE_AVAILABLE = False
-except Exception as _e:
-    BG_REMOVE_AVAILABLE = False
-    logging.warning(f"bg_remover ачаалагдсангүй: {_e}")
-
-
-def _remove_bg_bytes(img_bytes: bytes) -> bytes:
-    """U2Net ашиглан фоныг арилгана. Амжилтгүй бол эх зургийг буцаана."""
-    if not BG_REMOVE_AVAILABLE:
-        return img_bytes
-    try:
-        orig = PILImage.open(_io.BytesIO(img_bytes)).convert("RGBA")
-        rgb = orig.convert("RGB").resize((320, 320))
-        arr = np.array(rgb, dtype=np.float32) / 255.0
-        arr = (arr - np.array([0.485, 0.456, 0.406])) / np.array([0.229, 0.224, 0.225])
-        arr = arr.transpose(2, 0, 1)[np.newaxis, ...].astype(np.float32)
-        preds = _bg_session.run(None, {_bg_input_name: arr})
-        mask = preds[0].squeeze()
-        mask = (mask - mask.min()) / (mask.max() - mask.min() + 1e-8)
-        mask_img = PILImage.fromarray((mask * 255).astype(np.uint8)).resize(orig.size, PILImage.LANCZOS)
-        orig.putalpha(mask_img)
-        out = _io.BytesIO()
-        orig.save(out, format="PNG")
-        return out.getvalue()
-    except Exception as ex:
-        logging.warning(f"Фон арилгахад алдаа: {ex}")
-        return img_bytes
 
 load_dotenv()
 
@@ -439,15 +397,11 @@ HTML = """<!DOCTYPE html>
       <div class="prog-header">PROCESSING</div>
       <div class="step">
         <div class="step-icon wait" id="s1i">1</div>
-        <div class="step-text" id="s1t">Зургийн фон арилгаж байна...</div>
+        <div class="step-text" id="s1t">Composition prompt үүсгэж байна...</div>
       </div>
       <div class="step">
         <div class="step-icon wait" id="s2i">2</div>
-        <div class="step-text" id="s2t">Composition prompt үүсгэж байна...</div>
-      </div>
-      <div class="step">
-        <div class="step-icon wait" id="s3i">3</div>
-        <div class="step-text" id="s3t">AI зураг үүсгэж байна...</div>
+        <div class="step-text" id="s2t">AI зураг үүсгэж байна...</div>
       </div>
     </div>
 
@@ -507,7 +461,7 @@ async function generate() {
   document.getElementById('resultsSection').style.display = 'none';
   document.getElementById('errorBox').classList.remove('show');
   document.getElementById('resultsGrid').innerHTML = '';
-  setStep(1,'active'); setStep(2,'wait'); setStep(3,'wait');
+  setStep(1,'active'); setStep(2,'wait');
 
   const desc = `${picks.count}, ${picks.clothing} clothing, ${picks.bg} background, ${picks.format} format. ${document.getElementById('extraDesc').value}`.trim();
   const form = new FormData();
@@ -523,10 +477,9 @@ async function pollStatus(jobId) {
   const d = await (await fetch(`/status/${jobId}`)).json();
   if (d.step >= 1) setStep(1, d.step > 1 ? 'done' : 'active');
   if (d.step >= 2) setStep(2, d.step > 2 ? 'done' : 'active');
-  if (d.step >= 3) setStep(3, d.step > 3 ? 'done' : 'active');
   if (d.status === 'done') {
     clearInterval(pollInterval);
-    setStep(1,'done'); setStep(2,'done'); setStep(3,'done');
+    setStep(1,'done'); setStep(2,'done');
     showResults(jobId, d.count);
   } else if (d.status === 'error') {
     clearInterval(pollInterval);
@@ -614,26 +567,15 @@ async def run_pipeline(job_id: str, image_bytes_list: list[bytes],
         jobs[job_id] = {"status": status, "step": step, "message": message, "count": count}
 
     try:
-        # Алхам 1: Фон арилгах
+        # Алхам 1: Composition prompt үүсгэх
         update(1)
-        if BG_REMOVE_AVAILABLE:
-            logger.info(f"[{job_id}] {len(image_bytes_list)} зургийн фон арилгаж байна...")
-            image_bytes_list = await asyncio.to_thread(
-                lambda: [_remove_bg_bytes(b) for b in image_bytes_list]
-            )
-            logger.info(f"[{job_id}] Фон арилгалаа ✓")
-        else:
-            logger.info(f"[{job_id}] bg_remover байхгүй, алгасав")
-
-        # Алхам 2: Composition prompt үүсгэх
-        update(2)
         prompt = await asyncio.to_thread(
             ai_agent.generate_composition_prompt, description, image_bytes_list
         )
         logger.info(f"[{job_id}] Prompt бэлэн, {variants} хувилбар үүсгэнэ...")
 
-        # Алхам 3: N зураг зэрэг үүсгэх
-        update(3)
+        # Алхам 2: N зураг зэрэг үүсгэх
+        update(2)
         image_paths = [str(TEMP_DIR / f"{job_id}_{i}.png") for i in range(variants)]
 
         tasks = [
@@ -646,7 +588,7 @@ async def run_pipeline(job_id: str, image_bytes_list: list[bytes],
         if success_count == 0:
             raise RuntimeError(f"Жодон ч зураг үүсгэгдсэнгүй: {results[0]}")
 
-        update(4, status="done", count=success_count)
+        update(3, status="done", count=success_count)
         logger.info(f"[{job_id}] {success_count}/{variants} зураг амжилттай ✓")
 
     except Exception as e:
