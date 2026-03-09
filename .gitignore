@@ -1,0 +1,7 @@
+.env
+temp/
+__pycache__/
+*.pyc
+*.pyo
+*.log
+bg_remover/u2net.onnx
