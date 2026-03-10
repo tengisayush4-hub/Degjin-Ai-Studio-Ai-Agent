@@ -315,6 +315,31 @@ HTML = """<!DOCTYPE html>
   }
   .lightbox.show { display: flex; }
   .lightbox img { max-width: 90vw; max-height: 90vh; border-radius: 10px; }
+
+  /* ── Mobile ─────────────────────────────────────────── */
+  @media (max-width: 768px) {
+    body { height: auto; overflow: auto; }
+    .topbar { padding: 0 14px; height: 50px; gap: 8px; }
+    .topbar-logo { font-size: 0.95rem; }
+    .topbar-tab { padding: 5px 10px; font-size: 0.78rem; }
+    .layout { flex-direction: column; overflow: visible; height: auto; }
+    .sidebar {
+      width: 100%; border-right: none;
+      border-bottom: 1px solid rgba(255,255,255,0.07);
+      box-shadow: 0 4px 16px rgba(0,0,0,0.2);
+    }
+    .sidebar-scroll { padding: 14px; overflow-y: visible; }
+    .sidebar-footer { padding: 12px 14px; }
+    .main { padding: 16px; overflow-y: visible; }
+    .results-grid { grid-template-columns: 1fr; gap: 16px; }
+    .preview-item { width: 56px; height: 56px; }
+    .tog { padding: 7px 12px; font-size: 0.78rem; min-height: 36px; }
+    .run-btn { padding: 14px; font-size: 0.95rem; min-height: 48px; }
+    .empty-state { min-height: 160px; }
+    .result-card-footer { padding: 12px; }
+    .dl-btn { padding: 8px 12px; font-size: 0.78rem; }
+    a[href="/logout"] { padding: 5px 10px !important; font-size: 0.75rem !important; }
+  }
 </style>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -671,6 +696,10 @@ LOGIN_HTML = """<!DOCTYPE html>
   .btn:active { transform: translateY(4px); box-shadow: none; }
   .err { background: #1e0a0a; border: 1px solid #5a1a1a; border-radius: 8px; padding: 10px 14px; color: #f87171; font-size: 0.82rem; margin-bottom: 16px; display: none; }
   .err.show { display: block; }
+  @media (max-width: 480px) {
+    .card { width: 92vw; padding: 28px 20px; }
+    input { font-size: 16px; } /* iOS zoom fix */
+  }
 </style>
 </head>
 <body>
