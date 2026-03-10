@@ -5,13 +5,14 @@ FB AI Content Agent - Group Photo Compositor
 
 import os
 import uuid
+import secrets
 import logging
 import asyncio
 from pathlib import Path
-from fastapi import FastAPI, UploadFile, File, Form
-from fastapi.responses import HTMLResponse, FileResponse, JSONResponse
+from fastapi import FastAPI, UploadFile, File, Form, Request, Cookie
+from fastapi.responses import HTMLResponse, FileResponse, JSONResponse, RedirectResponse
 from dotenv import load_dotenv
-from typing import List
+from typing import List, Optional
 
 import image_gen
 import ai_agent
@@ -26,6 +27,16 @@ TEMP_DIR = Path("temp")
 TEMP_DIR.mkdir(exist_ok=True)
 
 jobs: dict[str, dict] = {}
+sessions: dict[str, str] = {}  # token -> role
+
+USERS = {
+    "admin": os.environ.get("ADMIN_PASSWORD", "admin123"),
+    "ajiltan": os.environ.get("WORKER_PASSWORD", "ajiltan123"),
+}
+
+def get_user(request: Request) -> Optional[str]:
+    token = request.cookies.get("session")
+    return sessions.get(token) if token else None
 
 app = FastAPI(title="FB AI Content Agent")
 
@@ -316,6 +327,8 @@ HTML = """<!DOCTYPE html>
   <div class="topbar-sep"></div>
   <button class="topbar-tab active" id="tab-group" onclick="switchTab('group')">📸 Зураг үүсгэх</button>
   <button class="topbar-tab" id="tab-restore" onclick="switchTab('restore')">🎨 Зураг сэргээх</button>
+  <div style="flex:1"></div>
+  <a href="/logout" style="padding:6px 14px;border-radius:8px;font-size:0.82rem;color:#6e6e8a;text-decoration:none;border:1px solid rgba(255,255,255,0.07);transition:all 0.2s;" onmouseover="this.style.color='#fff'" onmouseout="this.style.color='#6e6e8a'">Гарах ↗</a>
 </div>
 
 <div class="layout">
@@ -601,17 +614,132 @@ function setStep(n, state) {
 </html>"""
 
 
+LOGIN_HTML = """<!DOCTYPE html>
+<html lang="mn">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Нэвтрэх · Degjin Ai Studio</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: 'Inter', sans-serif;
+    background: #060609;
+    color: #d4d4e0;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: radial-gradient(circle at top center, #110e1c 0%, #060609 100%);
+  }
+  .card {
+    background: rgba(14,14,20,0.9);
+    border: 1px solid rgba(255,255,255,0.07);
+    border-radius: 20px;
+    padding: 40px 36px;
+    width: 360px;
+    box-shadow: 0 24px 60px rgba(0,0,0,0.5);
+  }
+  .logo {
+    font-size: 1.3rem; font-weight: 800;
+    background: linear-gradient(135deg, #a78bfa, #3b82f6);
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    text-align: center; margin-bottom: 8px;
+  }
+  .subtitle { text-align: center; color: #50506a; font-size: 0.82rem; margin-bottom: 32px; }
+  .field { margin-bottom: 16px; }
+  label { display: block; font-size: 0.78rem; color: #6e6e8a; font-weight: 600; letter-spacing: 0.08em; margin-bottom: 6px; }
+  input {
+    width: 100%; background: rgba(10,10,15,0.6);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 10px; color: #e0e0f0; font-size: 0.9rem;
+    padding: 11px 14px; outline: none; font-family: inherit;
+    transition: border-color 0.2s;
+  }
+  input:focus { border-color: #8b5cf6; }
+  .btn {
+    width: 100%; padding: 13px;
+    background: linear-gradient(to bottom, #8b5cf6, #6d28d9);
+    border: none; border-radius: 12px;
+    color: white; font-size: 0.95rem; font-weight: 700;
+    cursor: pointer; font-family: inherit; margin-top: 8px;
+    box-shadow: 0 4px 0 #4c1d95, 0 8px 20px rgba(109,40,217,0.4);
+    transition: all 0.1s;
+  }
+  .btn:hover { transform: translateY(-2px); box-shadow: 0 6px 0 #4c1d95, 0 12px 24px rgba(109,40,217,0.5); }
+  .btn:active { transform: translateY(4px); box-shadow: none; }
+  .err { background: #1e0a0a; border: 1px solid #5a1a1a; border-radius: 8px; padding: 10px 14px; color: #f87171; font-size: 0.82rem; margin-bottom: 16px; display: none; }
+  .err.show { display: block; }
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="logo">✨ Degjin Ai Studio</div>
+  <div class="subtitle">Системд нэвтрэх</div>
+  <div class="err" id="err">Нэвтрэх нэр эсвэл нууц үг буруу байна.</div>
+  <form method="POST" action="/login">
+    <div class="field">
+      <label>ХЭРЭГЛЭГЧ</label>
+      <input type="text" name="username" placeholder="admin / ajiltan" required autofocus>
+    </div>
+    <div class="field">
+      <label>НУУЦ ҮГ</label>
+      <input type="password" name="password" placeholder="••••••••" required>
+    </div>
+    <button class="btn" type="submit">Нэвтрэх →</button>
+  </form>
+</div>
+<script>
+  const p = new URLSearchParams(window.location.search);
+  if (p.get('err')) document.getElementById('err').classList.add('show');
+</script>
+</body>
+</html>"""
+
+
+@app.get("/login", response_class=HTMLResponse)
+async def login_page():
+    return LOGIN_HTML
+
+
+@app.post("/login")
+async def login(username: str = Form(...), password: str = Form(...)):
+    if USERS.get(username) == password:
+        token = secrets.token_hex(32)
+        sessions[token] = username
+        resp = RedirectResponse("/", status_code=303)
+        resp.set_cookie("session", token, httponly=True, max_age=86400 * 7)
+        return resp
+    return RedirectResponse("/login?err=1", status_code=303)
+
+
+@app.get("/logout")
+async def logout(request: Request):
+    token = request.cookies.get("session")
+    if token:
+        sessions.pop(token, None)
+    resp = RedirectResponse("/login", status_code=303)
+    resp.delete_cookie("session")
+    return resp
+
+
 @app.get("/", response_class=HTMLResponse)
-async def ui():
+async def ui(request: Request):
+    if not get_user(request):
+        return RedirectResponse("/login", status_code=303)
     return HTML
 
 
 @app.post("/generate")
 async def start_generate(
+    request: Request,
     images: List[UploadFile] = File(...),
     description: str = Form(""),
     variants: int = Form(1),
 ):
+    if not get_user(request):
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
     job_id = uuid.uuid4().hex[:10]
     image_bytes_list = [await img.read() for img in images]
     variants = max(1, min(3, variants))  # 1-3 хооронд
@@ -635,9 +763,12 @@ async def download_image(job_id: str, index: int):
 
 @app.post("/restore")
 async def start_restore(
+    request: Request,
     images: List[UploadFile] = File(...),
     description: str = Form(""),
 ):
+    if not get_user(request):
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
     job_id = uuid.uuid4().hex[:10]
     image_bytes_list = [await img.read() for img in images]
     jobs[job_id] = {"status": "processing", "step": 0, "message": "", "count": 0}
