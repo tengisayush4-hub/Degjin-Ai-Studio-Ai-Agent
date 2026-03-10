@@ -1,7 +1,7 @@
 """
 AI Agent core logic:
-- Upload хийсэн зургуудаас group photo composition prompt үүсгэх
-- System prompt: Group Photo Compositor
+- Group photo composition prompt
+- Image restoration / colorization prompt (Nano Banana Pro)
 """
 
 import os
@@ -11,6 +11,26 @@ import anthropic
 
 logger = logging.getLogger(__name__)
 
+
+def _get_mime_type(b: bytes) -> str:
+    if b.startswith(b'\x89PNG\r\n\x1a\n'): return "image/png"
+    if b.startswith(b'RIFF') and b[8:12] == b'WEBP': return "image/webp"
+    return "image/jpeg"
+
+
+def _build_content(image_bytes_list: list[bytes], user_text: str) -> list:
+    content = []
+    for img_bytes in image_bytes_list:
+        b64 = base64.b64encode(img_bytes).decode("utf-8")
+        content.append({
+            "type": "image",
+            "source": {"type": "base64", "media_type": _get_mime_type(img_bytes), "data": b64}
+        })
+    content.append({"type": "text", "text": user_text})
+    return content
+
+
+# ── Group Photo System ────────────────────────────────────────────────────────
 GROUP_PHOTO_SYSTEM = """You are an AI-powered group photo compositor assistant. Your sole purpose is to generate precise, optimized image generation prompts for merging separate individual photos into a single realistic group photo.
 
 ## YOUR CORE TASK
@@ -63,53 +83,42 @@ You MUST output a single, ready-to-use image generation prompt — nothing else.
 - Always add: "maintaining exact facial features and identity of all reference subjects" """
 
 
+# ── Restore / Colorize System ─────────────────────────────────────────────────
+RESTORE_SYSTEM = """You are an AI image prompt specialist for Nano Banana Pro.
+Detect what the user wants and respond accordingly:
+
+- If user wants a NEW image → write generation prompt
+- If user wants to COLORIZE an image → write colorization prompt
+- If user wants to EDIT an image → write editing prompt
+
+Always write output in English.
+Always preserve facial identity when people are involved.
+Return ONLY the prompt. No extra text."""
+
+
 def generate_composition_prompt(description: str, image_bytes_list: list[bytes]) -> str:
-    """
-    Upload хийсэн зургууд + тайлбараас group photo generation prompt үүсгэх.
-    Returns: Англи хэлний image generation prompt
-    """
     client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
-
-    def _get_mime_type(b: bytes) -> str:
-        if b.startswith(b'\x89PNG\r\n\x1a\n'): return "image/png"
-        if b.startswith(b'RIFF') and b[8:12] == b'WEBP': return "image/webp"
-        return "image/jpeg"
-
-    # Зургуудыг base64 болгох
-    content = []
-    for img_bytes in image_bytes_list:
-        b64 = base64.b64encode(img_bytes).decode("utf-8")
-        mime = _get_mime_type(img_bytes)
-        content.append({
-            "type": "image",
-            "source": {
-                "type": "base64",
-                "media_type": mime,
-                "data": b64
-            }
-        })
-
-    # Хэрэглэгчийн тайлбар нэмэх
     user_text = description if description.strip() else "Create a professional group photo from these individual photos."
-    content.append({"type": "text", "text": user_text})
-
     response = client.messages.create(
         model="claude-sonnet-4-6",
         max_tokens=1024,
         system=GROUP_PHOTO_SYSTEM,
-        messages=[
-            {"role": "user", "content": content}
-        ]
+        messages=[{"role": "user", "content": _build_content(image_bytes_list, user_text)}]
     )
-
     prompt = response.content[0].text.strip()
-    logger.info(f"Үүсгэсэн prompt: {prompt[:100]}...")
+    logger.info(f"Group prompt: {prompt[:100]}...")
     return prompt
 
 
-def get_processing_message() -> str:
-    return "Зургуудыг хүлээн авлаа!\nGroup photo үүсгэж байна...\n1-2 минут хүлээнэ үү."
-
-
-def get_error_message() -> str:
-    return "Уучлаарай, алдаа гарлаа.\nДахин оролдоно уу."
+def generate_restoration_prompt(description: str, image_bytes_list: list[bytes]) -> str:
+    client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+    user_text = description if description.strip() else "Colorize and restore this old photo, making it look vivid and modern."
+    response = client.messages.create(
+        model="claude-sonnet-4-6",
+        max_tokens=1024,
+        system=RESTORE_SYSTEM,
+        messages=[{"role": "user", "content": _build_content(image_bytes_list, user_text)}]
+    )
+    prompt = response.content[0].text.strip()
+    logger.info(f"Restore prompt: {prompt[:100]}...")
+    return prompt

@@ -314,7 +314,8 @@ HTML = """<!DOCTYPE html>
 <div class="topbar">
   <span class="topbar-logo">✨ Degjin Ai Studio</span>
   <div class="topbar-sep"></div>
-  <button class="topbar-tab active">📸 Зураг үүсгэх</button>
+  <button class="topbar-tab active" id="tab-group" onclick="switchTab('group')">📸 Зураг үүсгэх</button>
+  <button class="topbar-tab" id="tab-restore" onclick="switchTab('restore')">🎨 Зураг сэргээх</button>
 </div>
 
 <div class="layout">
@@ -322,6 +323,8 @@ HTML = """<!DOCTYPE html>
   <div class="sidebar">
     <div class="sidebar-scroll">
 
+      <!-- GROUP PHOTO PANEL -->
+      <div id="groupPanel">
       <div class="sec-label">INPUT IMAGES</div>
       <div class="upload-area" id="uploadArea">
         <input type="file" id="fileInput" accept="image/*" multiple onchange="handleFiles(this.files)">
@@ -377,6 +380,22 @@ HTML = """<!DOCTYPE html>
       <div class="sec-label">НЭМЭЛТ ТАЙЛБАР</div>
       <textarea id="extraDesc" placeholder="Жнь: 2 эмэгтэй, 1 эрэгтэй..."></textarea>
 
+      </div><!-- /groupPanel -->
+
+      <!-- RESTORE PANEL -->
+      <div id="restorePanel" style="display:none">
+      <div class="sec-label">ХУУЧИН ЗУРАГ ОРУУЛАХ</div>
+      <div class="upload-area" id="uploadAreaRestore">
+        <input type="file" id="fileInputRestore" accept="image/*" onchange="handleFilesRestore(this.files)">
+        <div class="upload-icon">🖼</div>
+        <div class="upload-hint">Хуучин зургаа чирж тавих эсвэл<br><strong>дарж сонгох</strong> · JPG · PNG</div>
+      </div>
+      <div id="previewGridRestore" class="preview-grid"></div>
+
+      <div class="sec-label">ТАЙЛБАР</div>
+      <textarea id="restoreDesc" placeholder="Жнь: colorize this old photo, restore scratches..."></textarea>
+      </div><!-- /restorePanel -->
+
     </div>
     <div class="sidebar-footer">
       <button class="run-btn" id="genBtn" onclick="generate()">
@@ -421,8 +440,19 @@ HTML = """<!DOCTYPE html>
 
 <script>
 let selectedFiles = [];
+let selectedFilesRestore = [];
 let picks = { variants: 1, count: '4 people', clothing: 'casual', bg: 'Mongolian nature', format: 'A4 landscape' };
 let pollInterval = null;
+let currentTab = 'group';
+
+function switchTab(tab) {
+  currentTab = tab;
+  document.getElementById('tab-group').classList.toggle('active', tab === 'group');
+  document.getElementById('tab-restore').classList.toggle('active', tab === 'restore');
+  document.getElementById('groupPanel').style.display = tab === 'group' ? '' : 'none';
+  document.getElementById('restorePanel').style.display = tab === 'restore' ? '' : 'none';
+  document.getElementById('runCount').style.display = tab === 'group' ? '' : 'none';
+}
 
 function pick(group, btn, val) {
   picks[group] = val;
@@ -453,8 +483,30 @@ function renderPreviews() {
 }
 function removeFile(i) { selectedFiles.splice(i, 1); renderPreviews(); }
 
+const areaR = document.getElementById('uploadAreaRestore');
+areaR.addEventListener('dragover', e => { e.preventDefault(); areaR.classList.add('dragover'); });
+areaR.addEventListener('dragleave', () => areaR.classList.remove('dragover'));
+areaR.addEventListener('drop', e => { e.preventDefault(); areaR.classList.remove('dragover'); handleFilesRestore(e.dataTransfer.files); });
+
+function handleFilesRestore(files) {
+  selectedFilesRestore = [];
+  for (const f of files) if (f.type.startsWith('image/')) selectedFilesRestore.push(f);
+  renderPreviewsRestore();
+}
+function renderPreviewsRestore() {
+  const grid = document.getElementById('previewGridRestore');
+  grid.innerHTML = '';
+  selectedFilesRestore.forEach((f, i) => {
+    const url = URL.createObjectURL(f);
+    const div = document.createElement('div');
+    div.className = 'preview-item';
+    div.innerHTML = `<img src="${url}"><button class="rm" onclick="removeFileRestore(${i})">✕</button>`;
+    grid.appendChild(div);
+  });
+}
+function removeFileRestore(i) { selectedFilesRestore.splice(i, 1); renderPreviewsRestore(); }
+
 async function generate() {
-  if (!selectedFiles.length) { alert('Хамгийн багадаа 1 зураг upload хийнэ үү!'); return; }
   document.getElementById('genBtn').disabled = true;
   document.getElementById('emptyState').style.display = 'none';
   document.getElementById('progressBox').classList.add('show');
@@ -463,12 +515,32 @@ async function generate() {
   document.getElementById('resultsGrid').innerHTML = '';
   setStep(1,'active'); setStep(2,'wait');
 
-  const desc = `${picks.count}, ${picks.clothing} clothing, ${picks.bg} background, ${picks.format} format. ${document.getElementById('extraDesc').value}`.trim();
-  const form = new FormData();
-  selectedFiles.forEach(f => form.append('images', f));
-  form.append('description', desc);
-  form.append('variants', picks.variants);
-  const resp = await fetch('/generate', { method: 'POST', body: form });
+  let resp;
+  if (currentTab === 'restore') {
+    if (!selectedFilesRestore.length) {
+      alert('Зураг upload хийнэ үү!');
+      document.getElementById('genBtn').disabled = false;
+      document.getElementById('progressBox').classList.remove('show');
+      return;
+    }
+    const form = new FormData();
+    selectedFilesRestore.forEach(f => form.append('images', f));
+    form.append('description', document.getElementById('restoreDesc').value);
+    resp = await fetch('/restore', { method: 'POST', body: form });
+  } else {
+    if (!selectedFiles.length) {
+      alert('Хамгийн багадаа 1 зураг upload хийнэ үү!');
+      document.getElementById('genBtn').disabled = false;
+      document.getElementById('progressBox').classList.remove('show');
+      return;
+    }
+    const desc = `${picks.count}, ${picks.clothing} clothing, ${picks.bg} background, ${picks.format} format. ${document.getElementById('extraDesc').value}`.trim();
+    const form = new FormData();
+    selectedFiles.forEach(f => form.append('images', f));
+    form.append('description', desc);
+    form.append('variants', picks.variants);
+    resp = await fetch('/generate', { method: 'POST', body: form });
+  }
   const { job_id } = await resp.json();
   pollInterval = setInterval(() => pollStatus(job_id), 2000);
 }
@@ -559,6 +631,43 @@ async def download_image(job_id: str, index: int):
     if not path.exists():
         return JSONResponse({"error": "Зураг олдсонгүй"}, status_code=404)
     return FileResponse(str(path), media_type="image/png", filename=f"group_{job_id}_{index+1}.png")
+
+
+@app.post("/restore")
+async def start_restore(
+    images: List[UploadFile] = File(...),
+    description: str = Form(""),
+):
+    job_id = uuid.uuid4().hex[:10]
+    image_bytes_list = [await img.read() for img in images]
+    jobs[job_id] = {"status": "processing", "step": 0, "message": "", "count": 0}
+    asyncio.create_task(run_restore_pipeline(job_id, image_bytes_list, description))
+    return {"job_id": job_id}
+
+
+async def run_restore_pipeline(job_id: str, image_bytes_list: list[bytes], description: str):
+    def update(step, status="processing", message="", count=0):
+        jobs[job_id] = {"status": status, "step": step, "message": message, "count": count}
+
+    try:
+        update(1)
+        prompt = await asyncio.to_thread(
+            ai_agent.generate_restoration_prompt, description, image_bytes_list
+        )
+        logger.info(f"[{job_id}] Restore prompt бэлэн...")
+
+        update(2)
+        path = str(TEMP_DIR / f"{job_id}_0.png")
+        result = await asyncio.to_thread(image_gen.generate_image, prompt, path, image_bytes_list)
+        if result is not True:
+            raise RuntimeError(str(result))
+
+        update(3, status="done", count=1)
+        logger.info(f"[{job_id}] Зураг сэргээлт амжилттай ✓")
+
+    except Exception as e:
+        logger.error(f"[{job_id}] Алдаа: {e}", exc_info=True)
+        update(0, status="error", message=str(e))
 
 
 async def run_pipeline(job_id: str, image_bytes_list: list[bytes],
