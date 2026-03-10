@@ -30,8 +30,8 @@ jobs: dict[str, dict] = {}
 sessions: dict[str, str] = {}  # token -> role
 
 USERS = {
-    "admin": os.environ.get("ADMIN_PASSWORD", "admin123"),
-    "ajiltan": os.environ.get("WORKER_PASSWORD", "ajiltan123"),
+    "Alifeedz": os.environ.get("ADMIN_PASSWORD", "Zaazaa11"),
+    "Dgent": os.environ.get("WORKER_PASSWORD", "Zaazaa11"),
 }
 
 def get_user(request: Request) -> Optional[str]:
@@ -681,7 +681,7 @@ LOGIN_HTML = """<!DOCTYPE html>
   <form method="POST" action="/login">
     <div class="field">
       <label>ХЭРЭГЛЭГЧ</label>
-      <input type="text" name="username" placeholder="admin / ajiltan" required autofocus>
+      <input type="text" name="username" placeholder="Нэвтрэх нэр" required autofocus>
     </div>
     <div class="field">
       <label>НУУЦ ҮГ</label>
